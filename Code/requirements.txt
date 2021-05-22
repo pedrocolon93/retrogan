@@ -1,0 +1,13 @@
+tensorflow
+torch
+numpy
+tqdm
+wandb
+scipy
+pandas
+conceptnet
+scikit-learn
+ray[default]
+ray[tune]
+fasttext
+msgpack==1.0.2

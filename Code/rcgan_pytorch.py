@@ -150,6 +150,22 @@ class RetroCycleGAN(nn.Module):
         self.g_AB.eval()
         self.g_BA.eval()
 
+    def set_fp16(self):
+        self.d_A = self.d_A.half() if self.fp16 else self.d_A
+        self.d_B = self.d_B.half() if self.fp16 else self.d_B
+        self.d_ABBA = self.d_ABBA.half() if self.fp16 else self.d_ABBA
+        self.d_BAAB = self.d_BAAB.half() if self.fp16 else self.d_BAAB
+        self.g_AB = self.g_AB.half() if self.fp16 else self.g_AB
+        self.g_BA = self.g_BA.half() if self.fp16 else self.g_BA
+    def set_fp32(self):
+        self.d_A = self.d_A.float() if self.fp16 else self.d_A
+        self.d_B = self.d_B.float() if self.fp16 else self.d_B
+        self.d_ABBA = self.d_ABBA.float() if self.fp16 else self.d_ABBA
+        self.d_BAAB = self.d_BAAB.float() if self.fp16 else self.d_BAAB
+        self.g_AB = self.g_AB.float() if self.fp16 else self.g_AB
+        self.g_BA = self.g_BA.float() if self.fp16 else self.g_BA
+
+
     def compile_all(self):
         '''Function that compiles the optimizers for the inner models'''
         # Discriminator optimizers
@@ -296,7 +312,8 @@ class RetroCycleGAN(nn.Module):
             wandb.run.save()
 
         res = []
-
+        self.set_fp16()
+        self.to_device(self.device)
         class RetroPairsDataset(Dataset):
             """Dataset of pairs of embeddings consisting of the distributional and its retrofitted counterpart."""
 
@@ -334,8 +351,8 @@ class RetroCycleGAN(nn.Module):
         # Initialize our models optimizers
         self.compile_all()
 
-        def train_step(batch_i, imgs_A, imgs_B, epoch, count, training_epochs):
-            with torch.cuda.amp.autocast():
+        def train_step(self, batch_i, imgs_A, imgs_B, epoch, count, training_epochs):
+
                 if imgs_A.shape[0] == 1:
                     print("Batch is equal to 1 in training.")
                     return
@@ -346,8 +363,9 @@ class RetroCycleGAN(nn.Module):
                 imgs_A = imgs_A.half() if self.fp16 else imgs_A.float()
                 imgs_B = imgs_B.half() if self.fp16 else imgs_B.float()
 
-                fake_B = self.g_AB(imgs_A)
-                fake_A = self.g_BA(imgs_B)
+                with torch.cuda.amp.autocast():
+                    fake_B = self.g_AB(imgs_A)
+                    fake_A = self.g_BA(imgs_B)
                 # Train the discriminators (original images = real / translated = Fake)
                 dA_loss = None
                 dB_loss = None
@@ -452,12 +470,13 @@ class RetroCycleGAN(nn.Module):
                 # TRAIN THE CYCLE DISCRIMINATORS
                 if self.cycle_dis:
                     a = datetime.datetime.now()
-
-                    fake_ABBA = self.g_BA(fake_B)
-                    fake_BAAB = self.g_AB(fake_A)
+                    with torch.cuda.amp.autocast():
+                        fake_ABBA = self.g_BA(fake_B)
+                        fake_BAAB = self.g_AB(fake_A)
                     self.dABBA_optimizer.zero_grad()
-                    dA = self.d_ABBA(torch.cat([fake_B, imgs_A], 1))
-                    dA_r = self.d_ABBA(torch.cat([fake_B, fake_ABBA], 1))
+                    with torch.cuda.amp.autocast():
+                        dA = self.d_ABBA(torch.cat([fake_B, imgs_A], 1))
+                        dA_r = self.d_ABBA(torch.cat([fake_B, fake_ABBA], 1))
                     dABBA_loss_real = CycleCond_Loss()(dA, dA_r)
                     # dABBA_loss_real = nn.BCEWithLogitsLoss()(dA, valid)
                     if self.fp16:
@@ -469,8 +488,9 @@ class RetroCycleGAN(nn.Module):
                         self.dABBA_optimizer.step()
 
                     self.dBAAB_optimizer.zero_grad()
-                    dB = self.d_BAAB(torch.cat([fake_A, imgs_B], 1))
-                    dB_r = self.d_BAAB(torch.cat([fake_A, fake_BAAB], 1))
+                    with torch.cuda.amp.autocast():
+                        dB = self.d_BAAB(torch.cat([fake_A, imgs_B], 1))
+                        dB_r = self.d_BAAB(torch.cat([fake_A, fake_BAAB], 1))
                     dBAAB_loss_real = CycleCond_Loss()(dB, dB_r)
                     # dABBA_loss_real = nn.BCEWithLogitsLoss()(dA, valid)
                     if self.fp16:
@@ -492,7 +512,8 @@ class RetroCycleGAN(nn.Module):
                 if self.one_way_mm:
                     self.g_AB_optimizer.zero_grad()
                     a = datetime.datetime.now()
-                    mm_a = self.g_AB(imgs_A)
+                    with torch.cuda.amp.autocast():
+                        mm_a = self.g_AB(imgs_A)
                     mm_a_loss = MaxMargin_Loss(batch_size=imgs_A.shape[0])(mm_a, imgs_B)
 
                     # Calling the step function on an Optimizer makes an update to its
@@ -507,7 +528,8 @@ class RetroCycleGAN(nn.Module):
                     mm_a_loss = mm_a_loss.item()
 
                     self.g_BA_optimizer.zero_grad()
-                    mm_b = self.g_BA(imgs_B)
+                    with torch.cuda.amp.autocast():
+                        mm_b = self.g_BA(imgs_B)
                     mm_b_loss = MaxMargin_Loss(batch_size=imgs_A.shape[0])(mm_b, imgs_A)
                     if self.fp16:
                         self.g_BA_optimizerscaler.scale(mm_b_loss).backward()
@@ -526,11 +548,12 @@ class RetroCycleGAN(nn.Module):
                 # Calculate the cycle A->B->A, B->A->B with max margin, and mae
                 a = datetime.datetime.now()
                 self.combined_optimizer.zero_grad()
-                fake_B = self.g_AB(imgs_A)
-                fake_A = self.g_BA(imgs_B)
-                # with torch.no_grad():
-                valid_A = self.d_A(fake_A)
-                valid_B = self.d_B(fake_B)
+                with torch.cuda.amp.autocast():
+                    fake_B = self.g_AB(imgs_A)
+                    fake_A = self.g_BA(imgs_B)
+                    # with torch.no_grad():
+                    valid_A = self.d_A(fake_A)
+                    valid_B = self.d_B(fake_B)
                 valid_A_loss = nn.BCEWithLogitsLoss()(valid_A, valid)
                 valid_B_loss = nn.BCEWithLogitsLoss()(valid_B, valid)
                 id_a = fake_B
@@ -541,8 +564,9 @@ class RetroCycleGAN(nn.Module):
                     mae_id_baab = gamma * torch.nn.L1Loss()(id_b, imgs_B)
                 else:
                     mae_id_abba = mae_id_baab = 0
-                fake_ABBA = self.g_BA(fake_B)
-                fake_BAAB = self.g_AB(fake_A)
+                with torch.cuda.amp.autocast():
+                    fake_ABBA = self.g_BA(fake_B)
+                    fake_BAAB = self.g_AB(fake_A)
                 if self.cycle_mm:
                     mm_abba = MaxMargin_Loss(batch_size=imgs_A.shape[0])(fake_ABBA, imgs_A)
                     mm_baab = MaxMargin_Loss(batch_size=imgs_A.shape[0])(fake_BAAB, imgs_B)
@@ -556,11 +580,12 @@ class RetroCycleGAN(nn.Module):
                     mae_abba = 0
                     mae_baab = 0
                 if self.cycle_dis:
-                    dA = self.d_ABBA(torch.cat([fake_B, imgs_A], 1))
-                    dA_r = self.d_ABBA(torch.cat([fake_B, fake_ABBA], 1))
-                    dABBA_loss_real = CycleCond_Loss()(dA, dA_r)
-                    dB = self.d_BAAB(torch.cat([fake_A, imgs_B], 1))
-                    dB_r = self.d_BAAB(torch.cat([fake_A, fake_BAAB], 1))
+                    with torch.cuda.amp.autocast():
+                        dA = self.d_ABBA(torch.cat([fake_B, imgs_A], 1))
+                        dA_r = self.d_ABBA(torch.cat([fake_B, fake_ABBA], 1))
+                        dABBA_loss_real = CycleCond_Loss()(dA, dA_r)
+                        dB = self.d_BAAB(torch.cat([fake_A, imgs_B], 1))
+                        dB_r = self.d_BAAB(torch.cat([fake_A, fake_BAAB], 1))
                     dBAAB_loss_real = CycleCond_Loss()(dB, dB_r)
                 else:
                     dABBA_loss_real = 0
@@ -630,7 +655,7 @@ class RetroCycleGAN(nn.Module):
             if iters is None:
                 for epoch in range(training_epochs):
                     for batch_i, (distributional_embeddings, retrofitted_embeddings) in enumerate(dataloader):
-                        train_step(batch_i, distributional_embeddings, retrofitted_embeddings, epoch, count,
+                        train_step(self, batch_i, distributional_embeddings, retrofitted_embeddings, epoch, count,
                                    training_epochs)
                         count += 1
                     print("\n")
@@ -664,7 +689,7 @@ class RetroCycleGAN(nn.Module):
                         if count >= iters:
                             running = False
                             break
-                        train_step(batch_i, distributional_embeddings, retrofitted_embeddings, epoch, count,
+                        train_step(self, batch_i, distributional_embeddings, retrofitted_embeddings, epoch, count,
                                    iters / len(dataloader))
                         count += 1
                     epoch += 1
@@ -710,6 +735,7 @@ class RetroCycleGAN(nn.Module):
         card = os.path.join(self.local_dir,card)
         fast_text_location = os.path.join(self.local_dir,fast_text_location)
         self.to("cpu")
+        self.set_fp32()
         self.put_eval()
         sl = helpertools.test_model(self.g_AB, dataset, dataset_location=simlex,
                                          prefix=prefix, pt=True)[0]
@@ -718,12 +744,20 @@ class RetroCycleGAN(nn.Module):
         c = helpertools.test_model(self.g_AB, dataset, dataset_location=card,
                                         prefix=prefix, pt=True)[0]
         self.to(self.device)
+        self.set_fp16()
         self.put_train()
         return sl, sv, c
 
     def to_device(self, device):
         self.device = device
+        self.d_A=self.d_A.to(device)
+        self.d_B=self.d_B.to(device)
+        self.d_ABBA=self.d_ABBA.to(device)
+        self.d_BAAB=self.d_BAAB.to(device)
+        self.g_AB=self.g_AB.to(device)
+        self.g_BA=self.g_BA.to(device)
         self.to(device)
+
 
     def save_model(self, name=""):
         try:

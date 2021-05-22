@@ -14,7 +14,13 @@ coming out in ACL FINDINGS 2021.
    >python retrogan_trainer.py --epochs 150 ../Data/ft_all_unseen.txt ../Data/ft_all_unseen_retrofitted.txt retrogan_nb_full_50epochs_alllosses models/retrogan_nb_full_50epochs_alllosses
 
 ## Parameter Tuning
+To run the parameter fine tuning, after installing the requirements, run:
+> python rg_ray_parameter_tuning.py
 
+NOTE: It may be the case that you run into an error with the msgpack library (something about an unknown argument), if that is the case, uninstall, and reinstall the msgpack libary:
+> pip uninstall msgpack
+> 
+> pip install msgpack
 ## Tests
 You can also run the ablation, full/disjoint, and percentage tests that were reported in the paper with the respective scripts:
 * ablationtests.sh
