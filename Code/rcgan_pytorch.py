@@ -11,8 +11,8 @@ from torch.optim import Adam
 from torch.utils.data import Dataset, DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
-
-import Code.helpertools
+from ray import tune
+import helpertools
 
 
 class MaxMargin_Loss(torch.nn.Module):
@@ -71,8 +71,9 @@ class RetroCycleGAN(nn.Module):
     def forward(self, x):
         return self.g_AB(x)
 
-    def __init__(self, save_index="0", save_folder="./", generator_size=32,
-                 discriminator_size=64, word_vector_dimensions=300,
+    def __init__(self, save_index="0", save_folder="./", generator_size=2048,
+                 generator_hidden_layers = 1, discriminator_hidden_layers = 1,
+                 discriminator_size=2048, word_vector_dimensions=300,
                  discriminator_lr=0.0001, generator_lr=0.0001,
                  one_way_mm=True, cycle_mm=True, cycle_dis=True, id_loss=True, cycle_loss=True,
                  device="cpu", name="default", fp16=False):
@@ -87,6 +88,8 @@ class RetroCycleGAN(nn.Module):
         # Size of the hidden layers
         self.gf = generator_size
         self.df = discriminator_size
+        self.g_ha = generator_hidden_layers
+        self.d_ha = discriminator_hidden_layers
         # Model name
         self.name = name
         # Set the learning rates
@@ -101,6 +104,7 @@ class RetroCycleGAN(nn.Module):
         self.id_loss_weight = 0.01
         self.cycle_loss = cycle_loss
 
+        self.local_dir = "../"
         # Simple trick to not suck up the memory when loading tensorflow.
         gpus = tf.config.experimental.list_physical_devices('GPU')
         if gpus:
@@ -119,14 +123,14 @@ class RetroCycleGAN(nn.Module):
 
         # Construct the inner workings of the model
         # Discriminators
-        self.d_A = self.build_discriminator()
-        self.d_B = self.build_discriminator()
+        self.d_A = self.build_discriminator(hidden_dim=self.df)
+        self.d_B = self.build_discriminator(hidden_dim=self.df)
         # Conditional discriminators
-        self.d_ABBA = self.build_c_discriminator()
-        self.d_BAAB = self.build_c_discriminator()
+        self.d_ABBA = self.build_c_discriminator(hidden_dim=self.df)
+        self.d_BAAB = self.build_c_discriminator(hidden_dim=self.df)
         # Generators
-        self.g_AB = self.build_generator()
-        self.g_BA = self.build_generator()
+        self.g_AB = self.build_generator(hidden_dim=self.gf)
+        self.g_BA = self.build_generator(hidden_dim=self.gf)
 
     def put_train(self):
         '''Function to set internal models as training'''
@@ -178,25 +182,29 @@ class RetroCycleGAN(nn.Module):
         s = torch.tensor(self.initializer(shape=inpt.weight.shape).numpy())
         inpt.weight = nn.parameter.Parameter(s)
         inpt.bias.data.fill_(0)
-        # Hidden layer
-        hid = nn.Linear(hidden_dim, hidden_dim)
-        s = torch.tensor(self.initializer(shape=hid.weight.shape).numpy())
-        hid.weight = nn.parameter.Parameter(s)
-        hid.bias.data.fill_(0)
         # Output layer
         out = nn.Linear(hidden_dim, self.word_vector_dimensions)
         s = torch.tensor(self.initializer(shape=out.weight.shape).numpy())
         out.weight = nn.parameter.Parameter(s)
         out.bias.data.fill_(0)
+        # Build the layers
+        layers = []
+        layers.append(inpt)
+        layers.append(nn.ReLU())
+        layers.append(nn.Dropout(dropout))
+        for i in range(self.g_ha):
+            # Hidden layer
+            hid = nn.Linear(hidden_dim, hidden_dim)
+            s = torch.tensor(self.initializer(shape=hid.weight.shape).numpy())
+            hid.weight = nn.parameter.Parameter(s)
+            hid.bias.data.fill_(0)
+            layers.append(hid)
+            layers.append(nn.ReLU())
+            layers.append(nn.Dropout(dropout))
+        layers.append(out)
         # Return a sequential model with all of this.
         return nn.Sequential(
-            inpt,
-            nn.ReLU(),
-            nn.Dropout(dropout),
-            hid,
-            nn.ReLU(),
-            nn.Dropout(dropout),
-            out,
+            *layers
         )
 
     def build_discriminator(self, hidden_dim=2048, dropout=0.3):
@@ -206,28 +214,34 @@ class RetroCycleGAN(nn.Module):
         s = torch.tensor(self.initializer(shape=inpt.weight.shape).numpy())
         inpt.weight = nn.parameter.Parameter(s)
         inpt.bias.data.fill_(0)
-        # Hidden layer
-        hid = nn.Linear(hidden_dim, hidden_dim)
-        s = torch.tensor(self.initializer(shape=hid.weight.shape).numpy())
-        hid.weight = nn.parameter.Parameter(s)
-        hid.bias.data.fill_(0)
+
         # Ouput layer
         out = nn.Linear(hidden_dim, 1)
         s = torch.tensor(self.initializer(shape=out.weight.shape).numpy())
         out.weight = nn.parameter.Parameter(s)
         out.bias.data.fill_(0)
-        # Batch norm for stability
-        bn = nn.BatchNorm1d(hidden_dim, momentum=0.99, eps=0.001)
+        # Construct a sequential
+        layers = []
+        layers.append(inpt)
+        layers.append(nn.ReLU())
+        layers.append(nn.Dropout(dropout))
+        for i in range(self.d_ha):
+            # Hidden layer
+            hid = nn.Linear(hidden_dim, hidden_dim)
+            s = torch.tensor(self.initializer(shape=hid.weight.shape).numpy())
+            hid.weight = nn.parameter.Parameter(s)
+            hid.bias.data.fill_(0)
+            layers.append(hid)
+            layers.append(nn.ReLU())
+            # Batch norm for stability
+            bn = nn.BatchNorm1d(hidden_dim, momentum=0.99, eps=0.001)
+            layers.append(bn)
+            layers.append(nn.Dropout(dropout))
+        layers.append(out)
+        # layers.append(nn.Sigmoid()) # We comment this out because we are using BCE with Logits loss and that has this already.)
+
         return nn.Sequential(
-            inpt,
-            nn.ReLU(),
-            nn.Dropout(dropout),
-            hid,
-            nn.ReLU(),
-            bn,
-            nn.Dropout(dropout),
-            out,
-            # nn.Sigmoid() # We comment this out because we are using BCE with Logits loss and that has this already.
+            *layers
         )
 
     def build_c_discriminator(self, hidden_dim=2048, dropout=0.3):
@@ -237,39 +251,49 @@ class RetroCycleGAN(nn.Module):
         s = torch.tensor(self.initializer(shape=inpt.weight.shape).numpy())
         inpt.weight = nn.parameter.Parameter(s)
         inpt.bias.data.fill_(0)
-        # Hidden layer
-        hid = nn.Linear(hidden_dim, hidden_dim)
-        s = torch.tensor(self.initializer(shape=hid.weight.shape).numpy())
-        hid.weight = nn.parameter.Parameter(s)
-        hid.bias.data.fill_(0)
         # Output layer
         out = nn.Linear(hidden_dim, 1)
         s = torch.tensor(self.initializer(shape=out.weight.shape).numpy())
         out.weight = nn.parameter.Parameter(s)
         out.bias.data.fill_(0)
-        # Batch norm for stability
-        bn = nn.BatchNorm1d(hidden_dim, momentum=0.99, eps=0.001)
+
+        # Construct a sequential
+        layers = []
+        layers.append(inpt)
+        layers.append(nn.ReLU())
+        layers.append(nn.Dropout(dropout))
+        for i in range(self.d_ha):
+            # Hidden layer
+            hid = nn.Linear(hidden_dim, hidden_dim)
+            s = torch.tensor(self.initializer(shape=hid.weight.shape).numpy())
+            hid.weight = nn.parameter.Parameter(s)
+            hid.bias.data.fill_(0)
+            layers.append(hid)
+            layers.append(nn.ReLU())
+            # Batch norm for stability
+            bn = nn.BatchNorm1d(hidden_dim, momentum=0.99, eps=0.001)
+            layers.append(bn)
+            layers.append(nn.Dropout(dropout))
+        layers.append(out)
+        layers.append(nn.Sigmoid())
+
         return nn.Sequential(
-            inpt,
-            nn.ReLU(),
-            nn.Dropout(dropout),
-            hid,
-            nn.ReLU(),
-            bn,
-            nn.Dropout(dropout),
-            out,
-            nn.Sigmoid()
+            *layers
         )
 
+
     def train_model(self, epochs, dataset, save_folder, batch_size=1, cache=False, epochs_per_checkpoint=5,
-                    dis_train_amount=3, iters=None):
+                    dis_train_amount=3, iters=None,wdb=True, tb=True, ray=False,local_dir="../"):
+        self.local_dir = local_dir
         # Make a writer for Tensorboard
-        writer = SummaryWriter()
+        if tb:
+            writer = SummaryWriter()
         # Use wandb for watching the model
-        wandb.init(project="retrogan", dir=save_folder)
-        wandb.run.name = self.name
-        wandb.watch(self, criterion="simlex")
-        wandb.run.save()
+        if wdb:
+            wandb.init(project="retrogan")
+            wandb.run.name = self.name
+            wandb.watch(self, criterion="simlex")
+            wandb.run.save()
 
         res = []
 
@@ -278,7 +302,7 @@ class RetroCycleGAN(nn.Module):
 
             def __init__(self, original_dataset, retrofitted_dataset, save_folder, cache):
                 # Load the data.
-                X_train, Y_train = Code.helpertools.load_all_words_dataset_final(original_dataset, retrofitted_dataset,
+                X_train, Y_train = helpertools.load_all_words_dataset_final(original_dataset, retrofitted_dataset,
                                                                                  save_folder=save_folder, cache=cache)
                 print("Shapes of training data:",
                       X_train.shape,
@@ -594,9 +618,11 @@ class RetroCycleGAN(nn.Module):
                         "mm_ba_loss": mm_b_loss if self.one_way_mm else 0,
                         "discriminator_cycle_loss": d_cycle_loss
                     }
-                    wandb.log(scalars, step=count)
-                    writer.add_scalars("run", tag_scalar_dict=scalars, global_step=count)
-                    writer.flush()
+                    if wdb:
+                        wandb.log(scalars, step=count)
+                    if tb:
+                        writer.add_scalars("run", tag_scalar_dict=scalars, global_step=count)
+                        writer.flush()
 
         def train_loop(training_epochs, iters=None):
             count = 0
@@ -612,15 +638,20 @@ class RetroCycleGAN(nn.Module):
                     print(sl, sv, c)
                     print("Saving our results.")
                     # Save to tensorboard
-                    writer.add_scalar("simlex", sl, global_step=count)
-                    writer.add_scalar("simverb", sv, global_step=count)
-                    writer.add_scalar("card", c, global_step=count)
-                    writer.flush()
+                    if tb:
+                        writer.add_scalar("simlex", sl, global_step=count)
+                        writer.add_scalar("simverb", sv, global_step=count)
+                        writer.add_scalar("card", c, global_step=count)
+                        writer.flush()
                     # Save them also to wandb
-                    wandb.log({"simlex": sl, "card": c, "simverb": sv, "epoch": epoch}, step=count)
+                    if wdb:
+                        wandb.log({"simlex": sl, "card": c, "simverb": sv, "epoch": epoch}, step=count)
+                    if ray:
+                        tune.report(**{"simlex": sl, "card": c, "simverb": sv, "epoch": epoch})
                     # Save a checkpoint
-                    if epoch % epochs_per_checkpoint == 0 and epoch != 0:
-                        self.save_model(name="checkpoint")
+                    if epochs_per_checkpoint is not None:
+                        if epoch % epochs_per_checkpoint == 0 and epoch != 0:
+                            self.save_model(name="checkpoint")
                     print("\n")
                     res.append((sl, sv, c))
                     print(res)
@@ -641,15 +672,18 @@ class RetroCycleGAN(nn.Module):
                     sl, sv, c = self.test(dataset)
                     print(sl, sv, c)
                     # Save to tensorboard
-                    writer.add_scalar("simlex", sl, global_step=count)
-                    writer.add_scalar("simverb", sv, global_step=count)
-                    writer.add_scalar("card", c, global_step=count)
-                    writer.flush()
+                    if tb:
+                        writer.add_scalar("simlex", sl, global_step=count)
+                        writer.add_scalar("simverb", sv, global_step=count)
+                        writer.add_scalar("card", c, global_step=count)
+                        writer.flush()
                     # Save to wandb
-                    wandb.log({"simlex": sl, "simverb": sv, "card": c}, step=count)
+                    if wdb:
+                        wandb.log({"simlex": sl, "simverb": sv, "card": c}, step=count)
                     # Save the checkpoint
-                    if epoch % epochs_per_checkpoint == 0 and epoch != 0:
-                        self.save_model(name="checkpoint")
+                    if epochs_per_checkpoint is not None:
+                        if epoch % epochs_per_checkpoint == 0 and epoch != 0:
+                            self.save_model(name="checkpoint")
                     print('\n')
                     res.append((sl, sv, c))
                     print(res)
@@ -665,19 +699,23 @@ class RetroCycleGAN(nn.Module):
         return res
 
     def test(self, dataset,
-             simlex="../Data/testing/simlexorig999.txt",
-             simverb="../Data/testing/simverb3500.txt",
-             card="../Data/testing/card660.tsv",
-             fasttext="../Data/fasttext_model/cc.en.300.bin",
+             simlex="Data/testing/simlexorig999.txt",
+             simverb="Data/testing/simverb3500.txt",
+             card="Data/testing/card660.tsv",
+             fast_text_location="Data/fasttext_model/cc.en.300.bin",
              prefix="en_"):
         '''Method to test out the model.'''
+        simlex = os.path.join(self.local_dir,simlex)
+        simverb = os.path.join(self.local_dir,simverb)
+        card = os.path.join(self.local_dir,card)
+        fast_text_location = os.path.join(self.local_dir,fast_text_location)
         self.to("cpu")
         self.put_eval()
-        sl = Code.helpertools.test_model(self.g_AB, dataset, dataset_location=simlex,
+        sl = helpertools.test_model(self.g_AB, dataset, dataset_location=simlex,
                                          prefix=prefix, pt=True)[0]
-        sv = Code.helpertools.test_model(self.g_AB, dataset, dataset_location=simverb,
+        sv = helpertools.test_model(self.g_AB, dataset, dataset_location=simverb,
                                          prefix=prefix, pt=True)[0]
-        c = Code.helpertools.test_model(self.g_AB, dataset, dataset_location=card,
+        c = helpertools.test_model(self.g_AB, dataset, dataset_location=card,
                                         prefix=prefix, pt=True)[0]
         self.to(self.device)
         self.put_train()

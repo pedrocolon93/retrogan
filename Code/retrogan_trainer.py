@@ -1,5 +1,3 @@
-from __future__ import print_function, division
-
 import argparse
 import os
 import random
@@ -7,7 +5,7 @@ import shutil
 
 import torch
 
-import Code.helpertools
+import helpertools
 from rcgan_pytorch import RetroCycleGAN
 import numpy as np
 
@@ -137,15 +135,15 @@ if __name__ == '__main__':
         rcgan.to_device('cpu')
         # Get initial testing results to see we are starting from scratch.
         # Load the data
-        X_train, Y_train = Code.helpertools.load_all_words_dataset_final(ds["original"], ds["retrofitted"],
+        X_train, Y_train = helpertools.load_all_words_dataset_final(ds["original"], ds["retrofitted"],
                                                                          save_folder=save_folder, cache=False)
-        sl_start = Code.helpertools.test_original_vectors(X_train, dataset_location="testing/simlexorig999.txt", prefix="en_")
-        sv_start = Code.helpertools.test_original_vectors(X_train, dataset_location="testing/simverb3500.txt", prefix="en_")
-        c_start = Code.helpertools.test_original_vectors(X_train, dataset_location="testing/card660.tsv", prefix="en_")
-        sl_rstart = Code.helpertools.test_original_vectors(Y_train, dataset_location="testing/simlexorig999.txt",
+        sl_start = helpertools.test_original_vectors(X_train, dataset_location="../Data/testing/simlexorig999.txt", prefix="en_")
+        sv_start = helpertools.test_original_vectors(X_train, dataset_location="../Data/testing/simverb3500.txt", prefix="en_")
+        c_start = helpertools.test_original_vectors(X_train, dataset_location="../Data/testing/card660.tsv", prefix="en_")
+        sl_rstart = helpertools.test_original_vectors(Y_train, dataset_location="../Data/testing/simlexorig999.txt",
                                                            prefix="en_")
-        sv_rstart = Code.helpertools.test_original_vectors(Y_train, dataset_location="testing/simverb3500.txt", prefix="en_")
-        c_rstart = Code.helpertools.test_original_vectors(Y_train, dataset_location="testing/card660.tsv", prefix="en_")
+        sv_rstart = helpertools.test_original_vectors(Y_train, dataset_location="../Data/testing/simverb3500.txt", prefix="en_")
+        c_rstart = helpertools.test_original_vectors(Y_train, dataset_location="../Data/testing/card660.tsv", prefix="en_")
         # Bring back to device for testing!
         rcgan.to_device(args.device)
 

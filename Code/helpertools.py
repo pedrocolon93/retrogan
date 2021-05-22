@@ -1,9 +1,9 @@
 import csv
-import gc
 import os
-
+import fasttext
 import numpy as np
 import pandas as pd
+import torch
 from conceptnet5.vectors import cosine_similarity
 from scipy.stats import pearsonr, spearmanr
 
@@ -46,51 +46,78 @@ def load_all_words_dataset_final(original, retrofitted, save_folder="./", cache=
     return X_train, Y_train
 
 
-def test_model(model, dataset, dataset_location='SimLex-999.txt',prefix=""):
-    '''Function to test out a given model, and an input dataset.'''
+def test_model(model, dataset, dataset_location='SimLex-999.txt',
+             fast_text_location="../Data/fasttext_model/cc.en.300.bin",prefix="",pt=False,use_ft=False):
     word_tuples = []
     my_word_tuples = []
+    global ft_model
     ds_model = None
-    if isinstance(dataset, pd.DataFrame):
+    # if ft_model is None:
+    #     ft_model= fasttext.load_model(fast_text_location)
+    if isinstance(dataset,pd.DataFrame):
         ds_model = dataset
-    elif dataset is not None:
-        ds_model = pd.read_hdf(dataset["original"], "mat")
-    # Ds model is the dataset that we will use to fetch the vectors. this can be replaced with a fasttext model,
-    # but at the moment it is a dataframe whose indexes are vectors
+    elif ".txt" in dataset["original"]:
+        ds_model = load_text_embeddings(dataset["original"])
 
-    # Open up the test data
+    elif dataset is not None:
+        ds_model = pd.read_hdf(dataset["original"],"mat")
+        # ds_model=ds_model.swapaxes(0,1)
+    retrogan = model
     with open(dataset_location) as csv_file:
-        csv_reader = csv.reader(csv_file, delimiter='\t')
+        # csv_reader = csv.reader(csv_file, delimiter='\t')
         line_count = 0
-        for row in csv_reader:
+        if use_ft:
+            global ft_model
+            if ft_model is None:
+                ft_model = fasttext.load_model(fast_text_location)
+        for row in csv_file:
+            # print(f'Word1:\t{row[0]}\tWord2:\t{row[1]}\tSimscore:\t{row[2]}.')
+            row = row.split()
             line_count += 1
             wtrow = []
-            wtrow.append(row[0]) # Word 1
-            wtrow.append(row[1]) # Word 2
-            wtrow.append(row[3]) # Similarity score
+            wtrow.append(row[0])
+            wtrow.append(row[1])
+            try:
+                wtrow.append(row[3])
+            except:
+                wtrow.append(row[2])
             word_tuples.append(wtrow)
             score = 0
             try:
-                # Word 1
-                mw1 = ds_model.loc[prefix + row[0].lower(), :]
-                mw1 = np.array(model.predict(np.array(mw1).reshape(1, 300))).reshape((300,))
-                # Word 2
-                mw2 = ds_model.loc[prefix + row[1].lower(), :]
-                mw2 = np.array(model.predict(np.array(mw2).reshape(1, 300))).reshape((300,))
-                # Sim score
-                score = cosine_similarity([mw1], [mw2])
-            except Exception as e:
-                print(e) # probably because the word is not in the dataset.
-                score = [0]
-            my_word_tuples.append((row[0], row[1], score[0]))
-        print(f'Processed {line_count} lines.')
-    # Calculate scores
-    pr = pearsonr([float(x[2]) for x in word_tuples], [float(x[2]) for x in my_word_tuples])
-    print('Pearson rho',pr)
-    sr = spearmanr([x[2] for x in word_tuples], [x[2] for x in my_word_tuples])
-    print('Spearman rho',sr)
-    return sr
+                if use_ft:
+                    mw1 = ft_model.get_word_vector(row[0])
+                    mw2 = ft_model.get_word_vector(row[1])
+                else:
+                    mw1 = ds_model.loc[prefix+row[0],:]
+                    mw2 = ds_model.loc[prefix+row[1],:]
+                mw1 /= np.linalg.norm(mw1)
+                mw2 /= np.linalg.norm(mw2)
+                if pt:
+                    mw1 = np.array(retrogan(torch.tensor(np.array(mw1).reshape(1, 300),dtype=torch.float32)).detach()).reshape((300,))
+                else:
+                    mw1 = np.array(retrogan.predict(np.array(mw1).reshape(1, 300))).reshape((300,))
+                # mw2 = ft_model.get_word_vector(row[1].lower())
+                if pt:
+                    mw2 = np.array(retrogan(torch.tensor(np.array(mw2).reshape(1, 300),dtype=torch.float32)).detach()).reshape((300,))
+                else:
+                    mw2 = np.array(retrogan.predict(np.array(mw2).reshape(1, 300))).reshape((300,))
+                mw1 /= np.linalg.norm(mw1)
+                mw2 /= np.linalg.norm(mw2)
 
+                score = np.inner(mw1, mw2)
+                del mw1, mw2
+            except Exception as e:
+                print(e)
+                score = [0]
+            my_word_tuples.append((row[0], row[1], score))
+
+        # print(f'Processed {line_count} lines.')
+    # pr = pearsonr([float(x[2]) for x in word_tuples], [float(x[2]) for x in my_word_tuples])
+    # print(pr)
+    sr = spearmanr([x[2] for x in word_tuples], [x[2] for x in my_word_tuples])
+    # print(sr)
+    # word_tuples = sorted(word_tuples,key=lambda x:(x[0],x[2]))
+    return sr
 
 def test_original_vectors(dataset, dataset_location='SimLex-999.txt', prefix=""):
     '''Similar to test_model, only it tests on the dataset, this is used to calculate distributional scores'''
