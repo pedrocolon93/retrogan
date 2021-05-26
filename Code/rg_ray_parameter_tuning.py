@@ -37,17 +37,18 @@ def trainable(config):
                                dis_train_amount=config["dis_train_amount"],
                                iters=None,ray=True,wdb=False,tb=False,local_dir=local_dir)
 if __name__ == '__main__':
+    # Best config:  {'g_lr': 0.00044, 'd_lr': 0.03606, 'one_way_mm': True, 'cycle_mm': True, 'cycle_dis': False, 'id_loss': False, 'cycle_loss': False, 'batch_size': 32, 'generator_size': 2048, 'discriminator_size': 2048, 'generator_hidden_layers': 1, 'discriminator_hidden_layers': 3, 'dis_train_amount': 3}
     config = {
-        "g_lr" : tune.quniform(0.00005,.1,0.00001),
-        "d_lr" : tune.quniform(0.00005,.1,0.00001),
+        "g_lr" : tune.qloguniform(0.00005,.1,0.00005),
+        "d_lr" : tune.qloguniform(0.00005,.1,0.00005),
         "one_way_mm" : True,
-        "cycle_mm" :tune.choice([False,True]),
-        "cycle_dis" : tune.choice([False,True]),
-        "id_loss" :tune.choice([False,True]),
-        "cycle_loss" : tune.choice([False,True]),
-        "batch_size":32,
-        "generator_size":2048,
-        "discriminator_size": 2048,
+        "cycle_mm" :True,
+        "cycle_dis" : True,
+        "id_loss" :True,
+        "cycle_loss" : True,
+        "batch_size":tune.choice([16,32,64]),
+        "generator_size": tune.choice([512,1024,2048]),
+        "discriminator_size": tune.choice([512,1024,2048]),
         "generator_hidden_layers": tune.choice([1,2,3]),
         "discriminator_hidden_layers": tune.choice([1,2,3]),
         "dis_train_amount":tune.choice([1,2,3])
@@ -63,7 +64,7 @@ if __name__ == '__main__':
             "gpu": 0.25
         },
         scheduler=hyperband,
-        num_samples = 100,
+        num_samples=25,
         config=config,
         name="tune_rg"
     )

@@ -1,0 +1,17 @@
+echo "Starting ablation tests!"
+SEED=42
+cd ../Code
+# Run on FULL
+CUDA_VISIBLE_DEVICES=0 python retrogan_trainer.py --seed $SEED  --device cuda --epochs 150 ../Data/ft_all_unseen.txt ../Data/ft_all_unseen_retrofitted.txt retrogan_full_150epochs_alllosses models/retrogan_full_150epochs_alllosses &
+CUDA_VISIBLE_DEVICES=1 python retrogan_trainer.py --seed $SEED  --device cuda --epochs 150 ../Data/ft_all_unseen.txt ../Data/ft_all_unseen_retrofitted.txt retrogan_full_150epochs_nocycledis models/retrogan_full_150epochs_nocycledis --cycle_dis false &  #Original paper work
+CUDA_VISIBLE_DEVICES=2 python retrogan_trainer.py --seed $SEED  --device cuda --epochs 150 ../Data/ft_all_unseen.txt ../Data/ft_all_unseen_retrofitted.txt retrogan_full_150epochs_nocyclemm models/retrogan_full_150epochs_nocyclemmcycledis --cycle_mm false &#Original paper work
+CUDA_VISIBLE_DEVICES=3 python retrogan_trainer.py --seed $SEED  --device cuda --epochs 150 ../Data/ft_all_unseen.txt ../Data/ft_all_unseen_retrofitted.txt retrogan_full_150epochs_nocyclemae models/retrogan_full_150epochs_nocyclemaecyclemmcycledis --cycle_loss false & #Original paper work
+CUDA_VISIBLE_DEVICES=0 python retrogan_trainer.py --seed $SEED  --device cuda --epochs 150 ../Data/ft_all_unseen.txt ../Data/ft_all_unseen_retrofitted.txt retrogan_full_150epochs_nocycleid models/retrogan_full_150epochs_nocycleididcyclemaecyclemmcycledis --id_loss false & #Original paper work
+CUDA_VISIBLE_DEVICES=1 python retrogan_trainer.py --seed $SEED  --device cuda --epochs 150 ../Data/ft_all_unseen.txt ../Data/ft_all_unseen_retrofitted.txt retrogan_full_150epochs_noonewaymm models/retrogan_full_150epochs_noonewaymmcycleididcyclemaecyclemmcycledis --one_way_mm false &  #Original paper work
+# Run on DISJOINT
+CUDA_VISIBLE_DEVICES=2 python retrogan_trainer.py --seed $SEED  --device cuda --epochs 150 ../Data/ft_all_unseen.txt ../Data/ft_all_retrofitted_ook_unseen.txt retrogan_ook_150epochs_alllosses models/retrogan_ook_150epochs_alllosses &
+CUDA_VISIBLE_DEVICES=3 python retrogan_trainer.py --seed $SEED  --device cuda --epochs 150 ../Data/ft_all_unseen.txt ../Data/ft_all_retrofitted_ook_unseen.txt retrogan_ook_150epochs_nocycledis models/retrogan_ook_150epochs_nocycledis --cycle_dis false &  #Original paper work
+CUDA_VISIBLE_DEVICES=0 python retrogan_trainer.py --seed $SEED  --device cuda --epochs 150 ../Data/ft_all_unseen.txt ../Data/ft_all_retrofitted_ook_unseen.txt retrogan_ook_150epochs_nocyclemm models/retrogan_ook_150epochs_nocyclemmcycledis --cycle_mm false  &#Original paper work
+CUDA_VISIBLE_DEVICES=1 python retrogan_trainer.py --seed $SEED  --device cuda --epochs 150 ../Data/ft_all_unseen.txt ../Data/ft_all_retrofitted_ook_unseen.txt retrogan_ook_150epochs_nocyclemae models/retrogan_ook_150epochs_nocyclemaecyclemmcycledis --cycle_loss false  & #Original paper work
+CUDA_VISIBLE_DEVICES=2 python retrogan_trainer.py --seed $SEED  --device cuda --epochs 150 ../Data/ft_all_unseen.txt ../Data/ft_all_retrofitted_ook_unseen.txt retrogan_ook_150epochs_nocycleid models/retrogan_ook_150epochs_nocycleididcyclemaecyclemmcycledis  --id_loss false & #Original paper work
+CUDA_VISIBLE_DEVICES=3 python retrogan_trainer.py --seed $SEED  --device cuda --epochs 150 ../Data/ft_all_unseen.txt ../Data/ft_all_retrofitted_ook_unseen.txt retrogan_ook_150epochs_noonewaymm models/retrogan_ook_150epochs_noonewaymmcycleididcyclemaecyclemmcycledis  --one_way_mm false  #Original paper work
