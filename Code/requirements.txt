@@ -12,3 +12,5 @@ ray[tune]
 fasttext
 msgpack==1.0.2
 plotly
+flask
+flask-cors

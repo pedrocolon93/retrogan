@@ -1,0 +1,17 @@
+extends layout
+
+block content
+    h1= title
+    p Welcome to #{title}
+    div(id='loader')
+    div(class='row')
+        div(id='network', class='column')
+        div(id='network2', class='column')
+
+    div
+        input(type='text', id='node_name',placeholder='new node name')
+        input(type='button',value='Find Neighbors', onclick='findAndAddNeighborsOfNode()')
+
+    div
+        p Amount of neighbors:
+            input(type='text', id='amount',placeholder='Amount of neighbors',value='10')

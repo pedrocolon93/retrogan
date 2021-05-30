@@ -11,8 +11,14 @@ from torch.optim import Adam
 from torch.utils.data import Dataset, DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
-from ray import tune
-import helpertools
+try:
+    from ray import tune
+except:
+    print("Could not load ray!")
+try:
+    import helpertools
+except:
+    print("Could not load helper tools!")
 
 
 class MaxMargin_Loss(torch.nn.Module):

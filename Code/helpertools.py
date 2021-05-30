@@ -6,6 +6,7 @@ import pandas as pd
 import torch
 from conceptnet5.vectors import cosine_similarity
 from scipy.stats import pearsonr, spearmanr
+from tqdm import tqdm
 
 
 def load_all_words_dataset_final(original, retrofitted, save_folder="./", cache=True, return_idx=False):
@@ -181,3 +182,24 @@ def load_text_embeddings(original):
                 vecs.append([float(x) for x in ls[1:]])
                 idxs.append(ls[0])
     return pd.DataFrame(index=idxs, data=vecs)
+
+
+def load_embeddings(path_to_embeddings, emb_amount_to_load,return_dict=False):
+    index = []
+    values = []
+    print("Loading",emb_amount_to_load,"embeddings from",path_to_embeddings)
+    with open(path_to_embeddings) as f:
+        for line in tqdm(f):
+            try:
+                if len(index)==emb_amount_to_load:
+                    break
+                s_line = line.split()
+                if len(s_line)<10:
+                    continue
+                values.append([float(x) for x in s_line[1:]])
+                index.append(s_line[0])
+            except:
+                pass
+    if return_dict:
+        return dict(zip(index,values))
+    return pd.DataFrame(data=values,index=index)

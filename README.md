@@ -29,7 +29,7 @@ You can also run the ablation, full/disjoint, and percentage tests that were rep
 
 ## Expected results
 Here is a table with the expected results:
-![Results](Results/results.png)
+![Results](Results/paper/results.png)
 
 ## Ablation study results
 ### One by one removal
